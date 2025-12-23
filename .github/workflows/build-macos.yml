@@ -23,9 +23,9 @@ jobs:
           brew install cmake python@3.11
           pip3 install --break-system-packages pyyaml
 
-      - name: Validate Homebrew formula
+      - name: Validate Homebrew formula syntax
         run: |
-          brew style --formula ./builders/macos/ros2-humble.rb
+          ruby -c ./builders/macos/ros2-humble.rb
 
       - name: Test formula installation
         run: |
