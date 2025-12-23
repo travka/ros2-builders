@@ -24,7 +24,7 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: python, ruby, shell
+          languages: python
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
@@ -87,11 +87,11 @@ jobs:
           docker build -t travka/ros2-humble:scan ./builders/docker
 
       - name: Run Grype vulnerability scanner
-        uses: anchore/grype-action@v0
+        uses: anchore/scan-action@v5
         with:
           image: travka/ros2-humble:scan
-          format: sarif
-          output: grype-results.sarif
+          output-format: sarif
+          output-file: grype-results.sarif
 
       - name: Upload Grype results
         uses: github/codeql-action/upload-sarif@v3
