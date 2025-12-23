@@ -24,7 +24,7 @@ jobs:
       - name: Setup Arch Linux
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git sudo
+          pacman -S --noconfirm base-devel git sudo namcap
 
       - name: Create build user
         run: |
