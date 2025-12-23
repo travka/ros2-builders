@@ -1,0 +1,11 @@
+# Trivy exclusions
+
+# Known vulnerabilities in base image (Ubuntu)
+CVE-2021-47390
+CVE-2022-2588
+
+# Build-time dependencies only
+Dockerfile:dl
+
+# Test dependencies
+builders/docker/*.sh:test

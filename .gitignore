@@ -1,0 +1,32 @@
+# Build artifacts
+*.pyc
+__pycache__/
+*.so
+*.dylib
+*.dll
+*.exe
+
+# ROS workspace
+ros2_workspace/
+build/
+install/
+log/
+
+# macOS
+.DS_Store
+*.dmg
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Docker
+.dockerignore
