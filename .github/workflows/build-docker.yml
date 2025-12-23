@@ -70,3 +70,4 @@ jobs:
         with:
           name: sbom
           path: sbom-${{ github.sha }}.json
+# Fix for workflow
