@@ -1,0 +1,42 @@
+name: Build AUR Package
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'builders/aur/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'builders/aur/**'
+  workflow_dispatch:
+
+jobs:
+  build-aur:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Arch Linux
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm base-devel git sudo
+
+      - name: Create build user
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+      - name: Validate PKGBUILD
+        run: |
+          cd builders/aur
+          sudo -u builder bash -c 'source /etc/makepkg.conf && namcap PKGBUILD'
+
+      - name: Test PKGBUILD parsing
+        run: |
+          cd builders/aur
+          sudo -u builder bash -c 'source PKGBUILD && echo "Package: $pkgname $pkgver-$pkgrel"'

@@ -1,0 +1,98 @@
+# Maintainer: travka <https://github.com/travka>
+pkgname=ros2-humble
+pkgver=2024.12.0
+pkgrel=1
+pkgdesc="Robot Operating System 2 Humble Hawksbill"
+arch=('x86_64' 'aarch64')
+url="https://docs.ros.org/en/humble/"
+license=('Apache-2.0')
+depends=(
+    'python'
+    'python-pip'
+    'python-setuptools'
+    'python-wheel'
+    'python-numpy'
+    'python-yaml'
+    'python-lark'
+    'cmake'
+    'make'
+    'gcc'
+    'tinyxml2'
+    'eigen'
+    'console_bridge'
+    'openssl'
+    'spdlog'
+    'assimp'
+    'bullet'
+    'qt6-base'
+    'ogre'
+)
+makedepends=(
+    'git'
+    'python-colcon-common-extensions'
+    'python-rosdep'
+    'python-vcstool'
+    'python-catkin_pkg'
+    'python-empy'
+)
+optdepends=(
+    'python-argcomplete: command completion'
+    'rviz2: visualization'
+    'gazebo: simulation'
+)
+source=("git+https://github.com/ros2/ros2.git#tag=release-humble-20241205")
+sha256sums=('SKIP')
+
+prepare() {
+    cd "$srcdir"
+    mkdir -p ros2_ws/src
+    cd ros2_ws
+
+    # Import ROS2 repositories
+    vcs import --input https://raw.githubusercontent.com/ros2/ros2/humble/ros2.repos src
+}
+
+build() {
+    cd "$srcdir/ros2_ws"
+
+    # Initialize rosdep
+    if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
+        sudo rosdep init || true
+    fi
+    rosdep update
+
+    # Install dependencies
+    rosdep install --from-paths src --ignore-src -y --skip-keys "fastcdr rti-connext-dds-6.0.1 urdfdom_headers"
+
+    # Build
+    colcon build \
+        --install-base "$pkgdir/opt/ros/humble" \
+        --cmake-args \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF
+}
+
+package() {
+    # Create setup files
+    mkdir -p "$pkgdir/etc/profile.d"
+    cat > "$pkgdir/etc/profile.d/ros2-humble.sh" << 'EOF'
+# ROS2 Humble environment setup
+if [ -f /opt/ros/humble/setup.bash ]; then
+    source /opt/ros/humble/setup.bash
+fi
+EOF
+    chmod 644 "$pkgdir/etc/profile.d/ros2-humble.sh"
+
+    # Create desktop entry
+    mkdir -p "$pkgdir/usr/share/applications"
+    cat > "$pkgdir/usr/share/applications/ros2-humble.desktop" << 'EOF'
+[Desktop Entry]
+Name=ROS2 Humble Terminal
+Comment=Open a terminal with ROS2 Humble environment
+Exec=bash -c "source /opt/ros/humble/setup.bash && exec bash"
+Icon=utilities-terminal
+Terminal=true
+Type=Application
+Categories=Development;
+EOF
+}
