@@ -2,6 +2,9 @@ ARG ROS_DISTRO=humble
 ARG UBUNTU_VERSION=jammy
 FROM ubuntu:${UBUNTU_VERSION}
 
+# Redeclare ARG after FROM (values don't persist across FROM)
+ARG ROS_DISTRO=humble
+
 LABEL maintainer="travka <https://github.com/travka>"
 LABEL org.opencontainers.image.description="ROS2 ${ROS_DISTRO} - Multi-platform build"
 LABEL org.opencontainers.image.source="https://github.com/travka/ros2-builders"
@@ -24,6 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-RUN rosdep update
+RUN rosdep init && rosdep update
 
 WORKDIR /root

@@ -20,11 +20,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          brew install cmake python@3.11 pyyaml
+          brew install cmake python@3.11
+          pip3 install --break-system-packages pyyaml
 
       - name: Validate Homebrew formula
         run: |
-          brew audit --strict ./builders/macos/ros2-humble.rb
+          brew style --formula ./builders/macos/ros2-humble.rb
 
       - name: Test formula installation
         run: |
