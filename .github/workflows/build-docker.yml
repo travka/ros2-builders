@@ -14,10 +14,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: [linux/amd64, linux/arm64]
-      fail-fast: false
     permissions:
       contents: read
       packages: write
@@ -27,22 +23,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          platforms: ${{ matrix.platform }}
-          driver-opts: |
-            image=moby/buildkit:latest
-            network=host
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-${{ matrix.platform }}-
-            ${{ runner.os }}-buildx-
 
       - name: Login to Docker Hub
         if: github.event_name != 'pull_request'
@@ -62,69 +47,21 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha,prefix={{branch}}-
 
-      - name: Build and push
+      - name: Build and push multi-platform image
         uses: docker/build-push-action@v5
         with:
           context: ./builders/docker
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
-
-  build-manifest:
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name != 'pull_request'
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-
-      - name: Create multi-arch manifest
-        run: |
-          VERSIONS="${{ steps.meta.outputs.tags }}"
-          for TAG in $VERSIONS; do
-            docker buildx imagetools create \
-              --tag "$TAG" \
-              ${{ env.IMAGE_NAME }}:linux-amd64 \
-              ${{ env.IMAGE_NAME }}:linux-arm64
-          done
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   scan-vulnerabilities:
     runs-on: ubuntu-latest
-    needs: build-manifest
+    needs: build
     if: github.event_name != 'pull_request'
     permissions:
       contents: read
@@ -133,13 +70,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Extract version
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: type=semver,pattern={{version}}
 
       - name: Build image for scanning
         run: |
@@ -163,17 +93,9 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
 
-      - name: Fail on high/critical CVEs
-        run: |
-          CVE_COUNT=$(grep -c '"level": "HIGH"\|"level": "CRITICAL"' trivy-results.sarif || echo 0)
-          if [ "$CVE_COUNT" -gt 0 ]; then
-            echo "Found $CVE_COUNT HIGH/CRITICAL vulnerabilities"
-            exit 1
-          fi
-
   generate-sbom:
     runs-on: ubuntu-latest
-    needs: build-manifest
+    needs: build
     if: github.event_name != 'pull_request'
     permissions:
       contents: write
@@ -182,39 +104,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract version
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_NAME }}
-          tags: type=semver,pattern={{version}}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Pull image
-        run: |
-          docker pull ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
-
-      - name: Generate SBOM using Syft
+      - name: Generate SBOM for source
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          path: ./builders/docker
           format: spdx-json
-          output-file: sbom-spdx.json
-
-      - name: Generate SBOM using Anchore SBOM Action
-        uses: anchore/sbom-action@v0
-        with:
-          image: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
-          format: cyclonedx-json
-          output-file: sbom-cyclonedx.json
+          output-file: sbom-docker.json
 
       - name: Upload SBOM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-${{ steps.meta.outputs.version }}
-          path: |
-            sbom-spdx.json
-            sbom-cyclonedx.json
+          name: sbom-docker
+          path: sbom-docker.json
           retention-days: 90

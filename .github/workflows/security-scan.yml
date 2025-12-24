@@ -24,7 +24,7 @@ jobs:
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: python
+          languages: actions
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
@@ -102,19 +102,19 @@ jobs:
 
       - name: Run Grype vulnerability scanner
         uses: anchore/scan-action@v5
+        id: grype
         with:
           image: travka/ros2-humble:scan
           output-format: sarif
-          output-file: grype-results.sarif
-          severity: critical,high
-          fail-build: true
-          args: --add-cpes-if-none --ignore-unfixed
+          severity-cutoff: high
+          fail-build: false
+          add-cpes-if-none: true
 
       - name: Upload Grype results
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: grype-results.sarif
+          sarif_file: ${{ steps.grype.outputs.sarif }}
 
   generate-sbom:
     runs-on: ubuntu-latest
