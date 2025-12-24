@@ -56,7 +56,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          pip3 install --break-system-packages \
+          python3.11 -m pip install --break-system-packages \
             setuptools wheel \
             colcon-common-extensions \
             pyyaml lark-parser numpy
@@ -113,7 +113,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew install cmake python@3.11 libyaml
-          pip3 install --break-system-packages pyyaml colcon-common-extensions
+          python3.11 -m pip install --break-system-packages pyyaml colcon-common-extensions
 
       - name: Create test workspace
         run: |

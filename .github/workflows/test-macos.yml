@@ -96,11 +96,10 @@ jobs:
 
       - name: Verify Python dependencies
         run: |
-          pip3 install --break-system-packages setuptools wheel lark-parser numpy colcon-common-extensions
+          python3.11 -m pip install --break-system-packages setuptools wheel lark-parser numpy colcon-common-extensions pyyaml
 
       - name: Check Python modules
         run: |
-          pip3 install --break-system-packages pyyaml
           python3.11 -c "import setuptools; import wheel; import yaml; print('All modules imported successfully')"
 
   test-installation:
