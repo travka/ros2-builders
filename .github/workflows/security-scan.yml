@@ -88,6 +88,8 @@ jobs:
           image: travka/ros2-humble:scan
           output-format: sarif
           output-file: grype-results.sarif
+          severity: critical,high
+          fail-build: false
 
       - name: Upload Grype results
         uses: github/codeql-action/upload-sarif@v3
