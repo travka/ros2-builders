@@ -101,7 +101,7 @@ jobs:
           docker buildx build --load -t travka/ros2-humble:scan ./builders/docker
 
       - name: Run Grype vulnerability scanner
-        uses: anchore/scan-action@v5
+        uses: anchore/scan-action@v7
         id: grype
         with:
           image: travka/ros2-humble:scan
