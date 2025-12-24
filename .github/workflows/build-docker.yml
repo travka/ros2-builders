@@ -14,6 +14,10 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+      fail-fast: false
     permissions:
       contents: read
       packages: write
@@ -25,8 +29,23 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+        with:
+          platforms: ${{ matrix.platform }}
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-${{ matrix.platform }}-
+            ${{ runner.os }}-buildx-
 
       - name: Login to Docker Hub
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -49,24 +68,154 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./builders/docker
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      - name: Generate SBOM
-        if: github.event_name != 'pull_request'
-        uses: anchore/sbom-action@v0
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  build-manifest:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Create multi-arch manifest
+        run: |
+          VERSIONS="${{ steps.meta.outputs.tags }}"
+          for TAG in $VERSIONS; do
+            docker buildx imagetools create \
+              --tag "$TAG" \
+              ${{ env.IMAGE_NAME }}:linux-amd64 \
+              ${{ env.IMAGE_NAME }}:linux-arm64
+          done
+
+  scan-vulnerabilities:
+    runs-on: ubuntu-latest
+    needs: build-manifest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: type=semver,pattern={{version}}
+
+      - name: Build image for scanning
+        run: |
+          docker buildx create --use
+          docker buildx build --load \
+            --platform linux/amd64 \
+            -t ${{ env.IMAGE_NAME }}:scan \
+            ./builders/docker
+
+      - name: Run Trivy scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:scan
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      - name: Fail on high/critical CVEs
+        run: |
+          CVE_COUNT=$(grep -c '"level": "HIGH"\|"level": "CRITICAL"' trivy-results.sarif || echo 0)
+          if [ "$CVE_COUNT" -gt 0 ]; then
+            echo "Found $CVE_COUNT HIGH/CRITICAL vulnerabilities"
+            exit 1
+          fi
+
+  generate-sbom:
+    runs-on: ubuntu-latest
+    needs: build-manifest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: type=semver,pattern={{version}}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Pull image
+        run: |
+          docker pull ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+
+      - name: Generate SBOM using Syft
+        uses: anchore/syft-action@v0
         with:
           image: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
           format: spdx-json
-          output-file: sbom-${{ github.sha }}.json
+          output-file: sbom-spdx.json
+          file: sbom-spdx.json
 
-      - name: Upload SBOM
-        if: github.event_name != 'pull_request'
+      - name: Generate SBOM using Anchore SBOM Action
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          format: cyclonedx-json
+          output-file: sbom-cyclonedx.json
+
+      - name: Upload SBOM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sbom
-          path: sbom-${{ github.sha }}.json
+          name: sbom-${{ steps.meta.outputs.version }}
+          path: |
+            sbom-spdx.json
+            sbom-cyclonedx.json
+          retention-days: 90

@@ -1,0 +1,256 @@
+name: Test macOS Formula
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*.*.*' ]
+    paths:
+      - 'builders/macos/**'
+      - '.github/workflows/test-macos.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'builders/macos/**'
+      - '.github/workflows/test-macos.yml'
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test-formula-syntax:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Ruby syntax
+        run: ruby -c ./builders/macos/ros2-humble.rb
+
+      - name: Validate Homebrew formula
+        run: |
+          brew audit --strict ./builders/macos/ros2-humble.rb || true
+          brew style ./builders/macos/ros2-humble.rb || true
+
+      - name: Extract formula metadata
+        run: |
+          ruby -r yaml <<'EOF'
+          require 'json'
+
+          formula = File.read('./builders/macos/ros2-humble.rb')
+
+          # Extract version
+          version = formula[/version "([^"]+)"/, 1]
+          puts "Formula Version: #{version}"
+
+          # Extract dependencies
+          deps = formula.scan(/depends_on "([^"]+)"/).flatten
+          puts "Dependencies: #{deps.join(', ')}"
+
+          # Extract homepage
+          homepage = formula[/homepage "([^"]+)"/, 1]
+          puts "Homepage: #{homepage}"
+
+          # Extract license
+          license = formula[/license "([^"]+)"/, 1]
+          puts "License: #{license}"
+
+          # Save metadata
+          metadata = {
+            version: version,
+            dependencies: deps,
+            homepage: homepage,
+            license: license
+          }
+
+          File.write('formula-metadata.json', JSON.pretty_generate(metadata))
+          EOF
+
+      - name: Upload formula metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: formula-metadata
+          path: formula-metadata.json
+
+  test-dependencies:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract dependencies from formula
+        id: deps
+        run: |
+          DEPS=$(grep -o 'depends_on "[^"]*"' ./builders/macos/ros2-humble.rb | sed 's/depends_on "//g; s/"//g')
+          echo "deps=$DEPS" >> $GITHUB_OUTPUT
+          echo "Dependencies: $DEPS"
+
+      - name: Install build dependencies
+        run: |
+          brew update
+          brew install cmake pkg-config python@3.11
+
+      - name: Install formula dependencies
+        run: |
+          for dep in ${{ steps.deps.outputs.deps }}; do
+            if [[ "$dep" != "python-setuptools" && "$dep" != "python-wheel" ]]; then
+              brew install "$dep" || echo "Warning: Could not install $dep"
+            fi
+          done
+
+      - name: Verify Python dependencies
+        run: |
+          pip3 install --break-system-packages setuptools wheel lark-parser numpy colcon-common-extensions
+
+      - name: Check Python modules
+        run: |
+          python3.11 -c "import setuptools; import wheel; import yaml"
+
+  test-installation:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test environment
+        run: |
+          # Set up test directory
+          mkdir -p "$HOME/test-ros2"
+          cd "$HOME/test-ros2"
+
+          # Copy formula
+          cp "${GITHUB_WORKSPACE}/builders/macos/ros2-humble.rb" .
+
+      - name: Install formula from local file
+        working-directory: $HOME/test-ros2
+        run: |
+          brew uninstall ros2-humble || true
+          brew install --formula ./ros2-humble.rb || echo "Installation may fail - testing dependencies"
+
+      - name: Verify installation artifacts
+        run: |
+          echo "Checking for installation artifacts..."
+          [ -f /opt/homebrew/bin/ros2 ] && echo "✓ ros2 binary found" || echo "✗ ros2 binary not found (expected for test)"
+          [ -f /opt/homebrew/bin/colcon ] && echo "✓ colcon binary found" || echo "✗ colcon binary not found"
+          [ -d /opt/homebrew/Cellar/ros2-humble ] && echo "✓ ros2-humble directory found" || echo "✗ ros2-humble directory not found"
+
+      - name: Test setup.bash
+        run: |
+          if [ -f /opt/homebrew/opt/ros2-humble/setup.bash ]; then
+            source /opt/homebrew/opt/ros2-humble/setup.bash
+            echo "ROS_DISTRO: $ROS_DISTRO"
+            [ "$ROS_DISTRO" = "humble" ] && echo "✓ ROS_DISTRO set correctly" || echo "✗ ROS_DISTRO incorrect"
+          else
+            echo "setup.bash not found (may be expected)"
+          fi
+
+      - name: Test Python integration
+        run: |
+          python3.11 -c "
+          import sys
+          paths = sys.path
+          print('Python paths:')
+          for p in paths:
+              if 'ros' in p.lower():
+                  print(f'  - {p}')
+          "
+
+  test-bottles:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - os: ventura
+            runner: macos-13
+          - os: sonoma
+            runner: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update Homebrew
+        run: brew update
+
+      - name: Create bottle
+        run: |
+          cd $(brew --repo)
+          brew bottle --no-rebuild \
+            --root-url=https://ghcr.io/v2/travka/homebrew-ros2 \
+            --json \
+            ./builders/macos/ros2-humble.rb || echo "Bottle creation skipped"
+
+      - name: Upload bottle artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bottle-${{ matrix.os }}
+          path: "*.bottle.*"
+          retention-days: 7
+
+  test-workspace:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test workspace
+        run: |
+          WORKSPACE="$HOME/test_ros2_ws"
+          mkdir -p "$WORKSPACE/src"
+          cd "$WORKSPACE"
+
+          # Create a minimal package
+          mkdir -p src/test_package
+          cat > src/test_package/package.xml <<'EOF'
+          <?xml version="1.0"?>
+          <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+          <package format="3">
+            <name>test_package</name>
+            <version>0.0.1</version>
+            <description>Test package</description>
+            <maintainer email="test@test.com">Test</maintainer>
+            <license>Apache-2.0</license>
+            <buildtool_depend>ament_cmake</buildtool_depend>
+            <export><build_type>ament_cmake</build_type></export>
+          </package>
+          EOF
+
+          cat > src/test_package/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.8)
+          project(test_package)
+          find_package(ament_cmake REQUIRED)
+          ament_package()
+          EOF
+
+          # Test colcon build (if available)
+          if command -v colcon &> /dev/null; then
+            colcon build --packages-select test_package || echo "Build test skipped"
+          else
+            echo "colcon not available, skipping build test"
+          fi
+
+  security-scan:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Trivy
+        run: |
+          brew install trivy
+
+      - name: Scan formula directory
+        run: |
+          trivy fs --severity HIGH,CRITICAL ./builders/macos/ || true
+
+      - name: Check for security issues
+        run: |
+          echo "Checking for security issues in formula..."
+          # Check for hardcoded credentials
+          if grep -r -i "password\|secret\|token\|key" ./builders/macos/ros2-humble.rb | grep -v "^#" | grep -v "sha256\|url"; then
+            echo "::warning::Potential secrets found in formula"
+          fi

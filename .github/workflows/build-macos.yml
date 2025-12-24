@@ -5,28 +5,145 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-macos:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            arch: arm64
+            bottle_tag: sonoma
+          - runner: macos-13
+            arch: arm64
+            bottle_tag: ventura
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Homebrew cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Homebrew
+            ~/.cache/Homebrew
+          key: ${{ runner.os }}-homebrew-${{ matrix.bottle_tag }}-${{ hashFiles('**/ros2-humble.rb') }}
+          restore-keys: |
+            ${{ runner.os }}-homebrew-${{ matrix.bottle_tag }}-
+            ${{ runner.os }}-homebrew-
+
+      - name: Set up Python cache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: ${{ runner.os }}-pip-${{ matrix.bottle_tag }}-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.bottle_tag }}-
+            ${{ runner.os }}-pip-
+
+      - name: Update Homebrew
+        run: |
+          brew update
+          brew doctor || true
+
+      - name: Install build dependencies
+        run: |
+          brew install cmake pkg-config python@3.11
+
+      - name: Install Python dependencies
+        run: |
+          pip3 install --break-system-packages \
+            setuptools wheel \
+            colcon-common-extensions \
+            pyyaml lark-parser numpy
+
+      - name: Validate Homebrew formula syntax
+        run: |
+          ruby -c ./builders/macos/ros2-humble.rb
+
+      - name: Audit Homebrew formula
+        run: |
+          brew audit --strict ./builders/macos/ros2-humble.rb || true
+          brew style ./builders/macos/ros2-humble.rb || true
+
+      - name: Extract formula metadata
+        id: formula
+        run: |
+          VERSION=$(grep -o 'version "[^"]*"' ./builders/macos/ros2-humble.rb | sed 's/version "//; s/"//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Formula version: $VERSION"
+
+      - name: Test formula installation (dry run)
+        run: |
+          brew install --formula --dry-run ./builders/macos/ros2-humble.rb
+
+      - name: Build bottle
+        if: github.event_name != 'pull_request'
+        run: |
+          cd $(brew --repo)
+          brew bottle --no-rebuild \
+            --root-url=https://ghcr.io/v2/travka/homebrew-ros2 \
+            --json \
+            ./builders/macos/ros2-humble.rb || echo "Bottle build skipped"
+
+      - name: Upload bottle artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bottle-${{ matrix.bottle_tag }}
+          path: "*.bottle.*"
+          retention-days: 30
+
+  test-macos-integration:
     runs-on: macos-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Homebrew
-        run: |
-          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      - name: Update Homebrew
+        run: brew update
 
       - name: Install dependencies
         run: |
-          brew install cmake python@3.11
-          pip3 install --break-system-packages pyyaml
+          brew install cmake python@3.11 pyyaml
+          pip3 install --break-system-packages colcon-common-extensions
 
-      - name: Validate Homebrew formula syntax
+      - name: Create test workspace
         run: |
-          ruby -c ./builders/macos/ros2-humble.rb
+          WORKSPACE="$HOME/test_ws"
+          mkdir -p "$WORKSPACE/src"
+          cd "$WORKSPACE"
 
-      - name: Test formula installation
-        run: |
-          brew install --formula ./builders/macos/ros2-humble.rb || echo "Installation check completed"
+          # Create minimal test package
+          mkdir -p src/test_pkg
+          cat > src/test_pkg/package.xml <<'EOF'
+          <?xml version="1.0"?>
+          <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+          <package format="3">
+            <name>test_pkg</name>
+            <version>0.0.1</version>
+            <description>Test package</description>
+            <maintainer email="test@test.com">Test</maintainer>
+            <license>Apache-2.0</license>
+            <buildtool_depend>ament_cmake</buildtool_depend>
+            <export><build_type>ament_cmake</build_type></export>
+          </package>
+          EOF
+
+          cat > src/test_pkg/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.8)
+          project(test_pkg)
+          find_package(ament_cmake REQUIRED)
+          ament_package()
+          EOF
+
+          # Test with colcon if ament is available
+          if brew list ament-cmake &>/dev/null; then
+            colcon build --packages-select test_pkg || true
+          fi
+

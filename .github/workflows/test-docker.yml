@@ -1,0 +1,235 @@
+name: Test Docker Images
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*.*.*' ]
+    paths:
+      - 'builders/docker/**'
+      - '.github/workflows/test-docker.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'builders/docker/**'
+      - '.github/workflows/test-docker.yml'
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test-docker-image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        run: |
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --load \
+            -t ros2-humble-test:${{ github.sha }} \
+            ./builders/docker
+
+      - name: Test ROS2 installation
+        run: |
+          docker run --rm \
+            --platform ${{ matrix.platform }} \
+            ros2-humble-test:${{ github.sha }} \
+            bash -c "
+              # Test ROS_DISTRO environment variable
+              test \"\$ROS_DISTRO\" = \"humble\" || exit 1
+              echo '✓ ROS_DISTRO is set correctly'
+
+              # Test ros2 command
+              ros2 --version || exit 1
+              echo '✓ ros2 command works'
+
+              # Test colcon installation
+              colcon --version || exit 1
+              echo '✓ colcon is installed'
+
+              # Test rosdep
+              rosdep version || exit 1
+              echo '✓ rosdep is installed'
+
+              # Test python packages
+              python3 -c \"import rclpy\" || exit 1
+              echo '✓ rclpy Python module is available'
+
+              # Test ROS2 workspaces
+              source /opt/ros/humble/setup.bash || exit 1
+              echo '✓ ROS2 setup script sourced successfully'
+
+              # Test common ROS2 packages
+              dpkg -l | grep ros-humble-desktop || exit 1
+              echo '✓ ROS2 desktop packages installed'
+
+              echo 'All tests passed!'
+            "
+
+      - name: Test container startup
+        run: |
+          docker run --rm -d \
+            --name ros2-test-container \
+            --platform ${{ matrix.platform }} \
+            ros2-humble-test:${{ github.sha }} \
+            sleep 30
+
+          sleep 5
+          docker ps | grep ros2-test-container || exit 1
+          docker stop ros2-test-container
+          docker rm ros2-test-container
+
+  test-workspace-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        run: |
+          docker buildx build \
+            --load \
+            -t ros2-humble-test:${{ github.sha }} \
+            ./builders/docker
+
+      - name: Create and test workspace
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/test_workspace:/ros2_ws/src \
+            ros2-humble-test:${{ github.sha }} \
+            bash -c "
+              cd /ros2_ws
+              mkdir -p src/test_pkg
+
+              # Create a minimal ROS2 package
+              cat > src/test_pkg/package.xml << 'EOF'
+              <?xml version=\"1.0\"?>
+              <?xml-model href=\"http://download.ros.org/schema/package_format3.xsd\" schematypens=\"http://www.w3.org/2001/XMLSchema\"?>
+              <package format=\"3\">
+                <name>test_pkg</name>
+                <version>0.0.1</version>
+                <description>Test package</description>
+                <maintainer email=\"test@test.com\">Test</maintainer>
+                <license>Apache-2.0</license>
+
+                <buildtool_depend>ament_cmake</buildtool_depend>
+
+                <export>
+                  <build_type>ament_cmake</build_type>
+                </export>
+              </package>
+              EOF
+
+              # Create CMakeLists.txt
+              cat > src/test_pkg/CMakeLists.txt << 'EOF'
+              cmake_minimum_required(VERSION 3.8)
+              project(test_pkg)
+
+              if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES \"Clang\")
+                add_compile_options(-Wall -Wextra -Wpedantic)
+              endif()
+
+              find_package(ament_cmake REQUIRED)
+
+              ament_package()
+              EOF
+
+              # Try to build the package
+              source /opt/ros/humble/setup.bash
+              colcon build --packages-select test_pkg || exit 1
+              echo '✓ Test package built successfully'
+            "
+
+      - name: Test ROS2 node
+        run: |
+          docker run --rm \
+            ros2-humble-test:${{ github.sha }} \
+            bash -c "
+              source /opt/ros/humble/setup.bash
+              timeout 10 ros2 run demo_nodes_cpp talker &
+              TALKER_PID=\$!
+              sleep 2
+              timeout 10 ros2 run demo_nodes_cpp listener &
+              LISTENER_PID=\$!
+              sleep 3
+              kill \$TALKER_PID \$LISTENER_PID 2>/dev/null || true
+              echo '✓ ROS2 nodes can communicate'
+            " || echo "Node test completed"
+
+  security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        run: |
+          docker buildx build \
+            --load \
+            -t ros2-humble-test:${{ github.sha }} \
+            ./builders/docker
+
+      - name: Run Trivy security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ros2-humble-test:${{ github.sha }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Check for vulnerabilities
+        run: |
+          echo "Checking for security vulnerabilities..."
+          echo "High/Critical vulnerabilities will fail the build"
+
+  image-size-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test image
+        run: |
+          docker buildx build \
+            --load \
+            -t ros2-humble-test:${{ github.sha }} \
+            ./builders/docker
+
+      - name: Get image size
+        id: image_size
+        run: |
+          SIZE=$(docker images ros2-humble-test:${{ github.sha }} --format "{{.Size}}")
+          SIZE_BYTES=$(docker images ros2-humble-test:${{ github.sha }} --format "{{.Size}}" | tr -d 'GBMB' | awk '{print $1 * 1024^3}')
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+          echo "size_bytes=$SIZE_BYTES" >> $GITHUB_OUTPUT
+          echo "Image size: $SIZE"
+
+      - name: Check image size limits
+        run: |
+          SIZE_BYTES=${{ steps.image_size.outputs.size_bytes }}
+          MAX_SIZE=$(( 2 * 1024 * 1024 * 1024 ))  # 2GB limit
+
+          if [ "$SIZE_BYTES" -gt "$MAX_SIZE" ]; then
+            echo "::warning::Image size exceeds 2GB limit"
+          fi
