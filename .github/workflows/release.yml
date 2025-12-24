@@ -204,7 +204,7 @@ jobs:
           brew bottle --no-rebuild --root-url=https://ghcr.io/v2/travka/homebrew-ros2 ./builders/macos/ros2-humble.rb
 
       - name: Upload bottles
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bottle-${{ matrix.bottle_tag }}
           path: "*.bottle.tar.gz"
