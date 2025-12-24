@@ -48,6 +48,10 @@ jobs:
               test \"\$ROS_DISTRO\" = \"humble\" || exit 1
               echo '✓ ROS_DISTRO is set correctly'
 
+              # Source ROS2 setup first
+              source /opt/ros/humble/setup.bash || exit 1
+              echo '✓ ROS2 setup script sourced successfully'
+
               # Test ros2 command
               ros2 --version || exit 1
               echo '✓ ros2 command works'
@@ -63,10 +67,6 @@ jobs:
               # Test python packages
               python3 -c \"import rclpy\" || exit 1
               echo '✓ rclpy Python module is available'
-
-              # Test ROS2 workspaces
-              source /opt/ros/humble/setup.bash || exit 1
-              echo '✓ ROS2 setup script sourced successfully'
 
               # Test common ROS2 packages
               dpkg -l | grep ros-humble-desktop || exit 1
