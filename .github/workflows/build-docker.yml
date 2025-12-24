@@ -197,12 +197,11 @@ jobs:
           docker pull ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
 
       - name: Generate SBOM using Syft
-        uses: anchore/syft-action@v0
+        uses: anchore/sbom-action@v0
         with:
           image: ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
           format: spdx-json
           output-file: sbom-spdx.json
-          file: sbom-spdx.json
 
       - name: Generate SBOM using Anchore SBOM Action
         uses: anchore/sbom-action@v0

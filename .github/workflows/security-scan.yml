@@ -126,14 +126,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Generate SBOM for source code
-        uses: anchore/syft-action@v0
+        uses: anchore/sbom-action@v0
         with:
           path: .
           format: spdx-json
           output-file: sbom-source.json
 
       - name: Generate CycloneDX SBOM
-        uses: anchore/syft-action@v0
+        uses: anchore/sbom-action@v0
         with:
           path: .
           format: cyclonedx-json
