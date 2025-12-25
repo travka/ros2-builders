@@ -65,10 +65,11 @@ jobs:
         run: |
           ruby -c ./builders/macos/ros2-humble.rb
 
-      - name: Audit Homebrew formula
+      - name: Check Homebrew formula style
         run: |
-          brew audit --strict ./builders/macos/ros2-humble.rb || true
-          brew style ./builders/macos/ros2-humble.rb || true
+          # Note: brew audit requires formula to be in a tap, skip for local files
+          # Just run style check which works on local files
+          brew style --fix ./builders/macos/ros2-humble.rb || true
 
       - name: Extract formula metadata
         id: formula
