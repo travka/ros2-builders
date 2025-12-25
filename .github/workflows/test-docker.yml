@@ -27,6 +27,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Set up QEMU (for cross-arch tests)
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,amd64
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -52,9 +57,13 @@ jobs:
               source /opt/ros/humble/setup.bash || exit 1
               echo '✓ ROS2 setup script sourced successfully'
 
-              # Test ros2 command
-              ros2 --version || exit 1
-              echo '✓ ros2 command works'
+              # Test ros2 command (help instead of version flag)
+              ros2 --help >/dev/null || exit 1
+              echo '✓ ros2 CLI available'
+
+              # Quick ros2 subcommand sanity
+              ros2 pkg list >/dev/null || exit 1
+              echo '✓ ros2 pkg list works'
 
               # Test colcon installation
               colcon --version || exit 1

@@ -42,11 +42,27 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
+            # Only tag branches other than the default with branch names
+            type=ref,event=branch,enable=${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+          flavor: |
+            latest=true
+          labels: |
+            org.opencontainers.image.title=ROS2 Humble
+            org.opencontainers.image.description=ROS 2 Humble Hawksbill base image with desktop, colcon, rosdep, vcstool
+            org.opencontainers.image.vendor=travka
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.source=https://github.com/travka/ros2-builders
+            org.opencontainers.image.url=https://hub.docker.com/r/travka/ros2-humble
+            org.opencontainers.image.documentation=https://github.com/travka/ros2-builders
+            org.opencontainers.image.revision={{sha}}
+            org.opencontainers.image.version={{version}}
+            org.opencontainers.image.created={{date}}
 
       - name: Build and push multi-platform image
         uses: docker/build-push-action@v6
@@ -58,6 +74,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
 
   scan-vulnerabilities:
     runs-on: ubuntu-latest
