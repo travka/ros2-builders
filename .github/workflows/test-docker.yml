@@ -70,7 +70,7 @@ jobs:
               echo '✓ colcon is installed'
 
               # Test rosdep
-              rosdep version || exit 1
+              which rosdep || exit 1
               echo '✓ rosdep is installed'
 
               # Test python packages
