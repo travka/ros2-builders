@@ -16,9 +16,9 @@ jobs:
           - runner: macos-14
             arch: arm64
             bottle_tag: sonoma
-          - runner: macos-13
+          - runner: macos-15
             arch: arm64
-            bottle_tag: ventura
+            bottle_tag: sequoia
       fail-fast: false
 
     steps:

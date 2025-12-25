@@ -158,10 +158,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ventura
-            runner: macos-13
           - os: sonoma
             runner: macos-14
+          - os: sequoia
+            runner: macos-15
 
     steps:
       - name: Checkout
