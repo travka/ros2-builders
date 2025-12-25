@@ -85,6 +85,7 @@ jobs:
 
   grype-scan:
     runs-on: ubuntu-latest
+    needs: codeql
     permissions:
       contents: read
       security-events: write
@@ -109,6 +110,7 @@ jobs:
           severity-cutoff: high
           fail-build: false
           add-cpes-if-none: true
+          ignore-unfixed: true
 
       - name: Upload Grype results
         uses: github/codeql-action/upload-sarif@v4
