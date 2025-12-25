@@ -60,9 +60,6 @@ jobs:
             org.opencontainers.image.source=https://github.com/travka/ros2-builders
             org.opencontainers.image.url=https://hub.docker.com/r/travka/ros2-humble
             org.opencontainers.image.documentation=https://github.com/travka/ros2-builders
-            org.opencontainers.image.revision={{sha}}
-            org.opencontainers.image.version={{version}}
-            org.opencontainers.image.created={{date}}
 
       - name: Build and push multi-platform image
         uses: docker/build-push-action@v6
