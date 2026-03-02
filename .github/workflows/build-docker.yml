@@ -132,7 +132,7 @@ jobs:
           output-file: sbom-docker.json
 
       - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-docker
           path: sbom-docker.json
