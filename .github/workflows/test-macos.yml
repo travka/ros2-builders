@@ -66,7 +66,7 @@ jobs:
           EOF
 
       - name: Upload formula metadata
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: formula-metadata
           path: formula-metadata.json
@@ -179,7 +179,7 @@ jobs:
             ./builders/macos/ros2-humble.rb || echo "Bottle creation skipped"
 
       - name: Upload bottle artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: bottle-${{ matrix.os }}
